@@ -5,12 +5,16 @@ import time
 import webbrowser
 from datetime import datetime
 import math
+import pygame
 
 # Импортируем новый API (tasks) (разрабы чмошники удалили старыыыыыый)
 BaseOptions = mp.tasks.BaseOptions
 GestureRecognizer = mp.tasks.vision.GestureRecognizer
 GestureRecognizerOptions = mp.tasks.vision.GestureRecognizerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
+
+# Инициализируем аудио-микшер pygame
+pygame.mixer.init()
 
 # Переменные для хранения данных между кадрами
 last_gesture = "None"
@@ -19,14 +23,17 @@ current_landmarks = None
 # Флаги, чтобы действия не срабатывали бесконечно по кругу
 dota_started = False
 image_opened = False
+music_started = False  # Флаг для музыки
 
-# ТАЙМЕРЫ УДЕРЖАНИЯ
+# ТАЙМЕРЫ УДЕРЖАНИЯ (Добавили "Closed_Fist" в список отслеживания)
 gesture_timers = {
     "DOTA_ACTIVATED": None,
     "Thumbs_Up": None,
     "Open_Palm": None,
     "Victory": None,
-    "OK_Gesture": None
+    "OK_Gesture": None,
+    "ILoveYou": None,
+    "Closed_Fist": None
 }
 
 # Сколько секунд нужно непрерывно удерживать знак (1.0 = одна секунда)
@@ -34,7 +41,7 @@ CONFIDENCE_DELAY = 1.0
 
 
 def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: mp.Image, timestamp_ms: int):
-    global last_gesture, current_landmarks, dota_started, gesture_timers, image_opened
+    global last_gesture, current_landmarks, dota_started, gesture_timers, image_opened, music_started
 
     if result.gestures and result.hand_landmarks:
         # Получаем стандартный жест от встроенной модели
@@ -74,7 +81,15 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
         elif dist_thumb_index < 0.045 and current_landmarks[12].y < current_landmarks[10].y:
             detected_now = "OK_Gesture"
 
-        # 5. ПРОВЕРКА НА ЗНАК V (дефолтный знак)
+        # 5. ВСТРОЕННЫЙ ЖЕСТ I LOVE YOU (🤟) — ВКЛЮЧЕНИЕ МУЗЫКИ
+        elif model_gesture == "ILoveYou":
+            detected_now = "ILoveYou"
+
+        # 6. ВСТРОЕННЫЙ ЖЕСТ КУЛАК (✊) — ОСТАНОВКА МУЗЫКИ
+        elif model_gesture == "Closed_Fist":
+            detected_now = "Closed_Fist"
+
+        # 7. ПРОВЕРКА НА ЗНАК V (дефолтный знак)
         elif model_gesture == "Victory":
             detected_now = "Victory"
 
@@ -114,6 +129,24 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
                 elif detected_now == "OK_Gesture":
                     last_gesture = "OK_CONFIRMED"
 
+                elif detected_now == "ILoveYou":
+                    last_gesture = "ILY_CONFIRMED"
+                    if not music_started:
+                        print("Жест ILY зафиксирован 1 сек! Включаю встроенную музыку...")
+                        try:
+                            pygame.mixer.music.load("music.mp3")
+                            pygame.mixer.music.play()
+                            music_started = True
+                        except Exception as e:
+                            print(f"Ошибка воспроизведения файла music.mp3: {e}")
+                            music_started = True
+
+                elif detected_now == "Closed_Fist":
+                    last_gesture = "FIST_CONFIRMED"
+                    # Останавливаем музыку и сбрасываем флаг, чтобы можно было включить трек заново
+                    pygame.mixer.music.stop()
+                    music_started = False
+
                 elif detected_now == "Victory":
                     if last_gesture != "Victory_CONFIRMED":
                         print("Hello World!")
@@ -125,8 +158,6 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
             image_opened = False
 
     else:
-        # НАОБОРОТ: Если рука полностью пропала из кадра — мы сбрасываем абсолютно всё,
-        # включая таймер ладони. Программа продолжит работать дальше.
         for gesture_name in gesture_timers.keys():
             gesture_timers[gesture_name] = None
 
@@ -159,7 +190,7 @@ DAYS_RU = {
 cap = cv2.VideoCapture(0)
 timestamp = 0
 
-print("Программа запущенна. Доступны жесты: V, Средний палец, Ладонь, Лайк и ОК.")
+print("Программа запущенна. Доступны жесты: V, Средний палец, Ладонь, Лайк, ОК, ILY и Кулак.")
 
 with GestureRecognizer.create_from_options(options) as recognizer:
     while cap.isOpened():
@@ -209,10 +240,16 @@ with GestureRecognizer.create_from_options(options) as recognizer:
             cv2.putText(frame, f"Day:  {day_of_week}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 150), 2)
             cv2.putText(frame, f"Time: {time_str}", (50, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 255), 3)
 
+        # Реакция на жест рок-любви ILY
+        elif last_gesture == "ILY_CONFIRMED":
+            cv2.putText(frame, "PLAYING MUSIC...", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
+
+        # Реакция на кулак (остановка музыки)
+        elif last_gesture == "FIST_CONFIRMED":
+            cv2.putText(frame, "MUSIC STOPPED", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
         elif last_gesture == "Open_Palm_CONFIRMED":
             cv2.putText(frame, "BYE", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
-
-            # Если рука остается в кадре, проверяем суммарное время (1 сек уверенности + 1.5 сек на прощание)
             if gesture_timers["Open_Palm"] is not None and (time.time() - gesture_timers["Open_Palm"]) >= (
                     CONFIDENCE_DELAY + 1.5):
                 print("Жест удержан. Выход из программы.")
@@ -225,3 +262,4 @@ with GestureRecognizer.create_from_options(options) as recognizer:
 
 cap.release()
 cv2.destroyAllWindows()
+pygame.mixer.quit()
