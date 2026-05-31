@@ -3,6 +3,8 @@ import mediapipe as mp
 import os
 import time
 import webbrowser
+from datetime import datetime  # Добавили для работы с датой и временем
+import math  # Добавили, чтобы считать расстояние между пальцами для жеста ОК
 
 # Импортируем новый API (tasks) (разрабы чмошники удалили старыыыыыый)
 BaseOptions = mp.tasks.BaseOptions
@@ -18,12 +20,13 @@ current_landmarks = None
 dota_started = False
 image_opened = False
 
-# ТАЙМЕРЫ УДЕРЖАНИЯ (для каждого знака свой)
+# ТАЙМЕРЫ УДЕРЖАНИЯ (добавили "OK_Gesture" в наш список)
 gesture_timers = {
     "DOTA_ACTIVATED": None,
     "Thumbs_Up": None,
     "Open_Palm": None,
-    "Victory": None
+    "Victory": None,
+    "OK_Gesture": None
 }
 
 # Сколько секунд нужно непрерывно удерживать знак (1.0 = одна секунда)
@@ -45,6 +48,13 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
 
         detected_now = "None"
 
+        # Считаем расстояние между кончиком большого (4) и указательного (8) для жеста ОК
+        # Формула расстояния между двумя точками на плоскости
+        dist_thumb_index = math.sqrt(
+            (current_landmarks[4].x - current_landmarks[8].x) ** 2 +
+            (current_landmarks[4].y - current_landmarks[8].y) ** 2
+        )
+
         # 1. ПРОВЕРКА НА СРЕДНИЙ ПАЛЕЦ (кастомная хрень т.к. гугл ленивые попы)
         if (current_landmarks[12].y < current_landmarks[10].y - 0.05 and
                 current_landmarks[8].y > current_landmarks[6].y and
@@ -55,26 +65,31 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
         elif model_gesture == "Open_Palm":
             detected_now = "Open_Palm"
 
-        # 3. я намучался нооооо проверка на лайк (все равно иногда путает кулак и лайк)
-        # abs(4.x - 2.x) < 0.08 проверяет, что большой палец поднят ВЕРТИКАЛЬНО, а не завален вбок на кулаке
+        # 3. ПРОКАЧАННАЯ СТРОГАЯ ПРОВЕРКА НА ЛАЙК (ФИКС КУЛАКА У ПОДБОРОДКА)
         elif (model_gesture == "Thumbs_Up" or
               (current_landmarks[4].y < current_landmarks[2].y - 0.05 and
                current_landmarks[4].y < current_landmarks[8].y - 0.04 and
                current_landmarks[4].y < current_landmarks[12].y - 0.04 and
-               abs(current_landmarks[4].x - current_landmarks[2].x) < 0.08 and  # Палец стоит ровно вертикально
+               abs(current_landmarks[4].x - current_landmarks[2].x) < 0.08 and
                current_landmarks[8].y > current_landmarks[6].y and
                current_landmarks[12].y > current_landmarks[10].y and
                current_landmarks[16].y > current_landmarks[14].y)):
             detected_now = "Thumbs_Up"
 
-        # 4. ПРОВЕРКА НА ЗНАК V (дефолтный знак)
+        # 4. КАСТOMНАЯ ПРОВЕРКА НА ЖЕСТ ОК (👌)
+        # Если кончики большого и указательного сомкнулись (расстояние меньше 0.045)
+        # и при этом средний палец (12) поднят вверх выше своего основания (10)
+        elif dist_thumb_index < 0.045 and current_landmarks[12].y < current_landmarks[10].y:
+            detected_now = "OK_Gesture"
+
+        # 5. ПРОВЕРКА НА ЗНАК V (дефолтный знак)
         elif model_gesture == "Victory":
             detected_now = "Victory"
 
-        #L - логика таймеров
+        # --- ЛОГИКА ТАЙМЕРОВ ---
         current_time = time.time()
 
-        # Сбрасываем таймеры для всех знаков, которые сейчас НЕ показываются
+        # Сбрасываем таймеры для всех знаков, которые СЕЙЧАС НЕ показываются
         for gesture_name in gesture_timers.keys():
             if gesture_name != detected_now:
                 gesture_timers[gesture_name] = None
@@ -103,6 +118,9 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
 
                 elif detected_now == "Open_Palm":
                     last_gesture = "Open_Palm_CONFIRMED"
+
+                elif detected_now == "OK_Gesture":
+                    last_gesture = "OK_CONFIRMED"
 
                 elif detected_now == "Victory":
                     if last_gesture != "Victory_CONFIRMED":
@@ -140,10 +158,16 @@ HAND_CONNECTIONS = [
     (5, 9), (9, 13), (13, 17)
 ]
 
+# Словарь для перевода дней недели на русский язык
+DAYS_RU = {
+    "Monday": "Ponedelnik", "Tuesday": "Vtornik", "Wednesday": "Sreda",
+    "Thursday": "Chetverg", "Friday": "Pyatnica", "Saturday": "Subbota", "Sunday": "Voskresenye"
+}
+
 cap = cv2.VideoCapture(0)
 timestamp = 0
 
-print("Программа запущенна. Требуется удержание жеста в течение 1 секунды.")
+print("Программа запущенна. Доступны жесты: V, Средний палец, Ладонь, Лайк и ОК.")
 
 with GestureRecognizer.create_from_options(options) as recognizer:
     while cap.isOpened():
@@ -170,7 +194,7 @@ with GestureRecognizer.create_from_options(options) as recognizer:
                 cx, cy = int(landmark.x * w), int(landmark.y * h)
                 cv2.circle(frame, (cx, cy), 5, (0, 0, 255), -1)
 
-        #РЕАКЦИЯ НА ЖЕСТЫ НА ЭКРАНЕ
+        # --- РЕАКЦИЯ НА ЖЕСТЫ НА ЭКРАНЕ ---
         if last_gesture.startswith("PENDING_"):
             cv2.putText(frame, "CHECKING...", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 215, 255), 2)
 
@@ -182,6 +206,20 @@ with GestureRecognizer.create_from_options(options) as recognizer:
 
         elif last_gesture == "Thumbs_Up_CONFIRMED":
             cv2.putText(frame, "OPENING IMAGE...", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 3)
+
+        # НАШ НОВЫЙ ОФИГЕННЫЙ ВИДЖЕТ ВРЕМЕНИ ДЛЯ ЖЕСТА ОК
+        elif last_gesture == "OK_CONFIRMED":
+            now = datetime.now()
+
+            # Форматируем данные по твоему ТЗ
+            date_str = now.strftime("%d.%m.%Y")  # день.месяц.год
+            day_of_week = DAYS_RU.get(now.strftime("%A"), now.strftime("%A"))  # день недели транслитом
+            time_str = now.strftime("%H:%M")  # время в 24-часовом формате
+
+            # Отрисовываем аккуратный красивый список строк на экране (фиолетовый цвет для стиля)
+            cv2.putText(frame, f"Date: {date_str}", (50, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 150), 2)
+            cv2.putText(frame, f"Day:  {day_of_week}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 150), 2)
+            cv2.putText(frame, f"Time: {time_str}", (50, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 255), 3)
 
         elif last_gesture == "Open_Palm_CONFIRMED":
             cv2.putText(frame, "BYE", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
