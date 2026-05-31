@@ -3,8 +3,8 @@ import mediapipe as mp
 import os
 import time
 import webbrowser
-from datetime import datetime  # Добавили для работы с датой и временем
-import math  # Добавили, чтобы считать расстояние между пальцами для жеста ОК
+from datetime import datetime
+import math
 
 # Импортируем новый API (tasks) (разрабы чмошники удалили старыыыыыый)
 BaseOptions = mp.tasks.BaseOptions
@@ -20,7 +20,7 @@ current_landmarks = None
 dota_started = False
 image_opened = False
 
-# ТАЙМЕРЫ УДЕРЖАНИЯ (добавили "OK_Gesture" в наш список)
+# ТАЙМЕРЫ УДЕРЖАНИЯ
 gesture_timers = {
     "DOTA_ACTIVATED": None,
     "Thumbs_Up": None,
@@ -41,15 +41,9 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
         model_gesture = result.gestures[0][0].category_name
         current_landmarks = result.hand_landmarks[0]
 
-        # Если мы уже запустили финальный таймер закрытия BYE, то не переключаемся
-        if gesture_timers["Open_Palm"] is not None and last_gesture == "Open_Palm_CONFIRMED":
-            last_gesture = "Open_Palm_CONFIRMED"
-            return
-
         detected_now = "None"
 
         # Считаем расстояние между кончиком большого (4) и указательного (8) для жеста ОК
-        # Формула расстояния между двумя точками на плоскости
         dist_thumb_index = math.sqrt(
             (current_landmarks[4].x - current_landmarks[8].x) ** 2 +
             (current_landmarks[4].y - current_landmarks[8].y) ** 2
@@ -65,7 +59,7 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
         elif model_gesture == "Open_Palm":
             detected_now = "Open_Palm"
 
-        # 3. ПРОКАЧАННАЯ СТРОГАЯ ПРОВЕРКА НА ЛАЙК (ФИКС КУЛАКА У ПОДБОРОДКА)
+        # 3. ПРОКАЧАННАЯ СТРОГАЯ ПРОВЕРКА НА ЛАЙК
         elif (model_gesture == "Thumbs_Up" or
               (current_landmarks[4].y < current_landmarks[2].y - 0.05 and
                current_landmarks[4].y < current_landmarks[8].y - 0.04 and
@@ -77,8 +71,6 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
             detected_now = "Thumbs_Up"
 
         # 4. КАСТOMНАЯ ПРОВЕРКА НА ЖЕСТ ОК (👌)
-        # Если кончики большого и указательного сомкнулись (расстояние меньше 0.045)
-        # и при этом средний палец (12) поднят вверх выше своего основания (10)
         elif dist_thumb_index < 0.045 and current_landmarks[12].y < current_landmarks[10].y:
             detected_now = "OK_Gesture"
 
@@ -133,13 +125,14 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
             image_opened = False
 
     else:
+        # НАОБОРОТ: Если рука полностью пропала из кадра — мы сбрасываем абсолютно всё,
+        # включая таймер ладони. Программа продолжит работать дальше.
         for gesture_name in gesture_timers.keys():
             gesture_timers[gesture_name] = None
 
-        if last_gesture != "Open_Palm_CONFIRMED":
-            last_gesture = "None"
-            current_landmarks = None
-            image_opened = False
+        last_gesture = "None"
+        current_landmarks = None
+        image_opened = False
 
 
 # Настраиваем нейросеть
@@ -158,7 +151,6 @@ HAND_CONNECTIONS = [
     (5, 9), (9, 13), (13, 17)
 ]
 
-# Словарь для перевода дней недели на русский язык
 DAYS_RU = {
     "Monday": "Ponedelnik", "Tuesday": "Vtornik", "Wednesday": "Sreda",
     "Thursday": "Chetverg", "Friday": "Pyatnica", "Saturday": "Subbota", "Sunday": "Voskresenye"
@@ -207,25 +199,23 @@ with GestureRecognizer.create_from_options(options) as recognizer:
         elif last_gesture == "Thumbs_Up_CONFIRMED":
             cv2.putText(frame, "OPENING IMAGE...", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 3)
 
-        # НАШ НОВЫЙ ОФИГЕННЫЙ ВИДЖЕТ ВРЕМЕНИ ДЛЯ ЖЕСТА ОК
         elif last_gesture == "OK_CONFIRMED":
             now = datetime.now()
+            date_str = now.strftime("%d.%m.%Y")
+            day_of_week = DAYS_RU.get(now.strftime("%A"), now.strftime("%A"))
+            time_str = now.strftime("%H:%M")
 
-            # Форматируем данные по твоему ТЗ
-            date_str = now.strftime("%d.%m.%Y")  # день.месяц.год
-            day_of_week = DAYS_RU.get(now.strftime("%A"), now.strftime("%A"))  # день недели транслитом
-            time_str = now.strftime("%H:%M")  # время в 24-часовом формате
-
-            # Отрисовываем аккуратный красивый список строк на экране (фиолетовый цвет для стиля)
             cv2.putText(frame, f"Date: {date_str}", (50, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 150), 2)
             cv2.putText(frame, f"Day:  {day_of_week}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 150), 2)
             cv2.putText(frame, f"Time: {time_str}", (50, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 255), 3)
 
         elif last_gesture == "Open_Palm_CONFIRMED":
             cv2.putText(frame, "BYE", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+
+            # Если рука остается в кадре, проверяем суммарное время (1 сек уверенности + 1.5 сек на прощание)
             if gesture_timers["Open_Palm"] is not None and (time.time() - gesture_timers["Open_Palm"]) >= (
                     CONFIDENCE_DELAY + 1.5):
-                print("Выход из программы по жесту.")
+                print("Жест удержан. Выход из программы.")
                 break
 
         cv2.imshow('I SEE YOU', frame)
