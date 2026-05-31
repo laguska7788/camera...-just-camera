@@ -25,7 +25,7 @@ dota_started = False
 image_opened = False
 music_started = False  # Флаг для музыки
 
-# ТАЙМЕРЫ УДЕРЖАНИЯ (Добавили "Closed_Fist" в список отслеживания)
+# ТАЙМЕРЫ УДЕРЖАНИЯ
 gesture_timers = {
     "DOTA_ACTIVATED": None,
     "Thumbs_Up": None,
@@ -66,7 +66,19 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
         elif model_gesture == "Open_Palm":
             detected_now = "Open_Palm"
 
-        # 3. ПРОКАЧАННАЯ СТРОГАЯ ПРОВЕРКА НА ЛАЙК
+        # 3. ИСПРАВЛЕННАЯ СВЕРХТОЧНАЯ ПРОВЕРКА НА КУЛАК (✊)
+        # Мы добавили проверку: кончик большого пальца (4) ДОЛЖЕН быть ниже или на уровне сустава указательного (6).
+        # Если большой палец поднят вверх (как на фото боком), это условие больше не сработает!
+        elif (model_gesture == "Closed_Fist" or
+              (current_landmarks[8].y > current_landmarks[6].y and
+               current_landmarks[12].y > current_landmarks[10].y and
+               current_landmarks[16].y > current_landmarks[14].y and
+               current_landmarks[20].y > current_landmarks[18].y and
+               current_landmarks[4].y > current_landmarks[6].y - 0.02)):
+            detected_now = "Closed_Fist"
+
+        # 4. ПРОКАЧАННАЯ СТРОГАЯ ПРОВЕРКА НА ЛАЙК
+        # Теперь лайк боком у подбородка идеально залетает сюда
         elif (model_gesture == "Thumbs_Up" or
               (current_landmarks[4].y < current_landmarks[2].y - 0.05 and
                current_landmarks[4].y < current_landmarks[8].y - 0.04 and
@@ -77,17 +89,13 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
                current_landmarks[16].y > current_landmarks[14].y)):
             detected_now = "Thumbs_Up"
 
-        # 4. КАСТOMНАЯ ПРОВЕРКА НА ЖЕСТ ОК (👌)
+        # 5. КАСТOMНАЯ ПРОВЕРКА НА ЖЕСТ ОК (👌)
         elif dist_thumb_index < 0.045 and current_landmarks[12].y < current_landmarks[10].y:
             detected_now = "OK_Gesture"
 
-        # 5. ВСТРОЕННЫЙ ЖЕСТ I LOVE YOU (🤟) — ВКЛЮЧЕНИЕ МУЗЫКИ
+        # 6. ВСТРОЕННЫЙ ЖЕСТ I LOVE YOU (🤟) — ВКЛЮЧЕНИЕ МУЗЫКИ
         elif model_gesture == "ILoveYou":
             detected_now = "ILoveYou"
-
-        # 6. ВСТРОЕННЫЙ ЖЕСТ КУЛАК (✊) — ОСТАНОВКА МУЗЫКИ
-        elif model_gesture == "Closed_Fist":
-            detected_now = "Closed_Fist"
 
         # 7. ПРОВЕРКА НА ЗНАК V (дефолтный знак)
         elif model_gesture == "Victory":
@@ -143,7 +151,6 @@ def print_result(result: mp.tasks.vision.GestureRecognizerResult, output_image: 
 
                 elif detected_now == "Closed_Fist":
                     last_gesture = "FIST_CONFIRMED"
-                    # Останавливаем музыку и сбрасываем флаг, чтобы можно было включить трек заново
                     pygame.mixer.music.stop()
                     music_started = False
 
@@ -240,11 +247,9 @@ with GestureRecognizer.create_from_options(options) as recognizer:
             cv2.putText(frame, f"Day:  {day_of_week}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 150), 2)
             cv2.putText(frame, f"Time: {time_str}", (50, 140), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 255), 3)
 
-        # Реакция на жест рок-любви ILY
         elif last_gesture == "ILY_CONFIRMED":
             cv2.putText(frame, "PLAYING MUSIC...", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
 
-        # Реакция на кулак (остановка музыки)
         elif last_gesture == "FIST_CONFIRMED":
             cv2.putText(frame, "MUSIC STOPPED", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
